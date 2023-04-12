@@ -41,27 +41,27 @@ pub fn capture(file_prefix: &str) {
     }
 }
 
-pub fn rec_on_key<K, M>(file_prefix: &str, run_permantently: bool, on_key: K, on_mouse: M)
+pub fn rec_on_key<K, M>(file_prefix: &'static str, run_permantently: bool, on_key: K, on_mouse: M)
 where
     K: Fn(&Keycode, KeyEventType) -> (),
     M: Fn(&usize, MouseEventType) -> ()
 {
     let device_state = DeviceState::new();
-
+    
     let _guard = device_state.on_key_down(|key| {
-        on_key(key, KeyEventType::KeyDown);
+        capture(file_prefix);
     });
 
     let _guard = device_state.on_key_up(|key| {
-        println!("Up: {:#?}", key);
+        capture(file_prefix);
     });
 
     let _guard = device_state.on_mouse_down(|key| {
-        println!("Up: {:#?}", key);
+        capture(file_prefix);
     });
 
     let _guard = device_state.on_mouse_up(|key| {
-        println!("Up: {:#?}", key);
+        capture(file_prefix);
     });
 
     if (run_permantently) {
@@ -73,6 +73,5 @@ where
 
 #[test]
 fn test_capture() {
-    capture("test_shot");
-    rec_on_key("yalla");
+    rec_on_key("yalla", true, |k, e| (), |m, e| ());
 }
