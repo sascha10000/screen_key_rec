@@ -143,37 +143,41 @@ pub fn rec_buffer<OnKey, OnMouse>(
     let device_state = DeviceState::new();
     
     // TODO: Add guards (otherwise ref is dropped an therefore the event is gone)
-    if events.key_down {
+    let _guard = if events.key_down {
         let kd = Arc::clone(&on_key);
-        device_state.on_key_down(move |key| {
+        Some(device_state.on_key_down(move |key| {
             let buffers = capture_and_buffer();
             kd(key.clone(), KeyEventType::KeyDown, buffers);
-        });
+        }))
     }
+    else { None };
 
-    if events.key_up {
+    let _guard = if events.key_up {
         let kd = Arc::clone(&on_key);
-        device_state.on_key_up(move |key| {
+        Some(device_state.on_key_up(move |key| {
             let buffers = capture_and_buffer();
             kd(key.clone(), KeyEventType::KeyUp, buffers);
-        });
+        }))
     }
+    else { None };
 
-    if events.mouse_down {
+    let _guard = if events.mouse_down {
         let md = Arc::clone(&on_mouse);
-        device_state.on_mouse_down(move |key| {
+        Some(device_state.on_mouse_down(move |key| {
             let buffers = capture_and_buffer();
             md(key.clone(), MouseEventType::MouseDown, buffers);
-        });
+        }))
     }
+    else { None };
 
-    if events.mouse_up {
+    let _guard = if events.mouse_up {
         let md = Arc::clone(&on_mouse);
-        device_state.on_mouse_up(move |key| {
+        Some(device_state.on_mouse_up(move |key| {
             let buffers = capture_and_buffer();
             md(key.clone(), MouseEventType::MouseUp, buffers);
-        });
+        }))
     }
+    else { None };
 
     if run_permantently
         && (events.key_down || events.key_up || events.mouse_down || events.mouse_up)
