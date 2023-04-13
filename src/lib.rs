@@ -1,10 +1,10 @@
-use device_query::{DeviceEvents, DeviceState, Keycode};
+use device_query::{DeviceEvents, DeviceState, Keycode, CallbackGuard, MouseButton};
 use screenshots::Screen;
 use std::{
     fs,
     sync::Arc,
     thread,
-    time::{Duration},
+    time::Duration,
 };
 use std::marker::{ Sync, Send };
 
@@ -52,6 +52,7 @@ pub fn capture_and_write(file_prefix: &str) {
             let ts = chrono::offset::Utc::now().format("%Y-%m-%d %H_%M_%S%.f");
             let file_name = format!("target/{}_{}_screen_{}.png", file_prefix, ts, i);
             println!("{}", file_name);
+            println!("{}", file_name);
             fs::write(file_name, &buffer).unwrap();
         }
     });
@@ -82,40 +83,44 @@ pub fn rec_to_file<K1, M1, K2, M2>(
     on_key_up: K2,
     on_mouse_up: M2,
 ) where
-    K1: Fn(&Keycode, KeyEventType) -> () + std::marker::Send + std::marker::Sync + 'static,
-    K2: Fn(&Keycode, KeyEventType) -> () + std::marker::Send + std::marker::Sync + 'static,
-    M1: Fn(&usize, MouseEventType) -> () + std::marker::Send + std::marker::Sync + 'static,
-    M2: Fn(&usize, MouseEventType) -> () + std::marker::Send + std::marker::Sync + 'static,
+    K1: Fn(&Keycode, KeyEventType) -> () + Send + Sync + 'static,
+    K2: Fn(&Keycode, KeyEventType) -> () + Send + Sync + 'static,
+    M1: Fn(&usize, MouseEventType) -> () + Send + Sync + 'static,
+    M2: Fn(&usize, MouseEventType) -> () + Send + Sync + 'static,
 {
     let device_state = DeviceState::new();
-
-    if events.key_down {
-        device_state.on_key_down(move |key| {
+    let _guard = if events.key_down {
+        Some(device_state.on_key_down(move |key| {
+            println!("CB exec");
             capture_and_write(file_prefix);
             on_key_down(key, KeyEventType::KeyDown);
-        });
+        }))
     }
+    else { None };
 
-    if events.key_up {
-        device_state.on_key_up(move |key| {
+    let _guard = if events.key_up {
+        Some(device_state.on_key_up(move |key| {
             capture_and_write(file_prefix);
             on_key_up(key, KeyEventType::KeyUp);
-        });
+        }))
     }
+    else { None };
 
-    if events.mouse_down {
-        device_state.on_mouse_down(move |key| {
+    let _guard = if events.mouse_down {
+        Some(device_state.on_mouse_down(move |key| {
             capture_and_write(file_prefix);
             on_mouse_down(key, MouseEventType::MouseDown);
-        });
+        }))
     }
+    else { None };
 
-    if events.mouse_up {
-        device_state.on_mouse_up(move |key| {
+    let _guard = if events.mouse_up {
+        Some(device_state.on_mouse_up(move |key| {
             capture_and_write(file_prefix);
             on_mouse_up(key, MouseEventType::MouseUp);
-        });
+        }))
     }
+    else { None };
 
     if run_permantently
         && (events.key_down || events.key_up || events.mouse_down || events.mouse_up)
@@ -136,7 +141,8 @@ pub fn rec_buffer<OnKey, OnMouse>(
     for<'lt> OnMouse: Fn(usize, MouseEventType, Vec<Vec<u8>>) + Sync + Send + 'lt,
 {
     let device_state = DeviceState::new();
-
+    
+    // TODO: Add guards (otherwise ref is dropped an therefore the event is gone)
     if events.key_down {
         let kd = Arc::clone(&on_key);
         device_state.on_key_down(move |key| {
