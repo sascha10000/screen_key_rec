@@ -1,18 +1,40 @@
 use device_query::{DeviceEvents, DeviceState, Keycode};
 use screenshots::Screen;
 use std::{
-    fs, thread,
-    time::{Duration, Instant}, sync::Arc,
+    fs,
+    sync::Arc,
+    thread,
+    time::{Duration},
 };
+use std::marker::{ Sync, Send };
 
 pub enum MouseEventType {
     MouseUp,
-    MouseDown
+    MouseDown,
 }
 
 pub enum KeyEventType {
     KeyUp,
-    KeyDown
+    KeyDown,
+}
+
+#[derive(Debug)]
+pub struct RegisterEvents {
+    key_up: bool,
+    key_down: bool,
+    mouse_up: bool,
+    mouse_down: bool,
+}
+
+impl Default for RegisterEvents {
+    fn default() -> Self {
+        Self {
+            key_up: true,
+            key_down: true,
+            mouse_up: true,
+            mouse_down: true,
+        }
+    }
 }
 
 impl From<KeyEventType> for String {
@@ -30,49 +52,126 @@ pub fn capture_and_write(file_prefix: &str) {
             let ts = chrono::offset::Utc::now().format("%Y-%m-%d %H_%M_%S%.f");
             let file_name = format!("target/{}_{}_screen_{}.png", file_prefix, ts, i);
             println!("{}", file_name);
-            fs::write(
-                file_name,
-                &buffer,
-            )
-            .unwrap();
+            fs::write(file_name, &buffer).unwrap();
         }
     });
 }
 
-pub fn capture(screen: &Screen) -> Vec<u8> {
-    let image = screen.capture().unwrap();
-    image.buffer().to_owned()
+pub fn capture_and_buffer() -> Vec<Vec<u8>> {
+    let screens = Screen::all().unwrap();
+    let mut buffers: Vec<Vec<u8>> = Vec::new();
+    for screen in screens {
+        buffers.push(capture(&screen));
+    }
+
+    buffers
 }
 
-pub fn rec_on_key<K1, M1, K2, M2>(file_prefix: &'static str, run_permantently: bool, on_key_down: K1, on_mouse_down: M1, on_key_up: K2, on_mouse_up: M2)
-where
+pub fn capture(screen: &Screen) -> Vec<u8> {
+    let image = screen.capture().unwrap();
+    let buffer = image.buffer().to_owned();
+    buffer
+}
+
+pub fn rec_to_file<K1, M1, K2, M2>(
+    file_prefix: &'static str,
+    events: RegisterEvents,
+    run_permantently: bool,
+    on_key_down: K1,
+    on_mouse_down: M1,
+    on_key_up: K2,
+    on_mouse_up: M2,
+) where
     K1: Fn(&Keycode, KeyEventType) -> () + std::marker::Send + std::marker::Sync + 'static,
     K2: Fn(&Keycode, KeyEventType) -> () + std::marker::Send + std::marker::Sync + 'static,
     M1: Fn(&usize, MouseEventType) -> () + std::marker::Send + std::marker::Sync + 'static,
-    M2: Fn(&usize, MouseEventType) -> () + std::marker::Send + std::marker::Sync + 'static
+    M2: Fn(&usize, MouseEventType) -> () + std::marker::Send + std::marker::Sync + 'static,
 {
-    let device_state = DeviceState::new();    
-    let _guard = device_state.on_key_down(move |key| {
-        capture_and_write(file_prefix);
-        on_key_down(key, KeyEventType::KeyDown);
-    });
+    let device_state = DeviceState::new();
 
-    let _guard = device_state.on_key_up(move |key| {
-        capture_and_write(file_prefix);
-        on_key_up(key, KeyEventType::KeyUp);
-    }); 
-    
-    let _guard = device_state.on_mouse_down(move |key| {
-        capture_and_write(file_prefix);
-        on_mouse_down(key, MouseEventType::MouseDown); 
-    });
+    if events.key_down {
+        device_state.on_key_down(move |key| {
+            capture_and_write(file_prefix);
+            on_key_down(key, KeyEventType::KeyDown);
+        });
+    }
 
-    let _guard = device_state.on_mouse_up(move |key| {
-        capture_and_write(file_prefix);
-        on_mouse_up(key, MouseEventType::MouseUp);
-    }); 
+    if events.key_up {
+        device_state.on_key_up(move |key| {
+            capture_and_write(file_prefix);
+            on_key_up(key, KeyEventType::KeyUp);
+        });
+    }
 
-    if run_permantently {
+    if events.mouse_down {
+        device_state.on_mouse_down(move |key| {
+            capture_and_write(file_prefix);
+            on_mouse_down(key, MouseEventType::MouseDown);
+        });
+    }
+
+    if events.mouse_up {
+        device_state.on_mouse_up(move |key| {
+            capture_and_write(file_prefix);
+            on_mouse_up(key, MouseEventType::MouseUp);
+        });
+    }
+
+    if run_permantently
+        && (events.key_down || events.key_up || events.mouse_down || events.mouse_up)
+    {
+        loop {
+            thread::sleep(Duration::from_secs(1000));
+        }
+    }
+}
+
+pub fn rec_buffer<OnKey, OnMouse>(
+    events: RegisterEvents,
+    run_permantently: bool,
+    on_key: Arc<OnKey>,
+    on_mouse: Arc<OnMouse>,
+) where
+    for<'lt> OnKey: Fn(Keycode, KeyEventType, Vec<Vec<u8>>) + Sync + Send + 'lt,
+    for<'lt> OnMouse: Fn(usize, MouseEventType, Vec<Vec<u8>>) + Sync + Send + 'lt,
+{
+    let device_state = DeviceState::new();
+
+    if events.key_down {
+        let kd = Arc::clone(&on_key);
+        device_state.on_key_down(move |key| {
+            let buffers = capture_and_buffer();
+            kd(key.clone(), KeyEventType::KeyDown, buffers);
+        });
+    }
+
+    if events.key_up {
+        let kd = Arc::clone(&on_key);
+        device_state.on_key_up(move |key| {
+            let buffers = capture_and_buffer();
+            kd(key.clone(), KeyEventType::KeyUp, buffers);
+        });
+    }
+
+    if events.mouse_down {
+        let md = Arc::clone(&on_mouse);
+        device_state.on_mouse_down(move |key| {
+            let buffers = capture_and_buffer();
+            md(key.clone(), MouseEventType::MouseDown, buffers);
+        });
+    }
+
+    if events.mouse_up {
+        let md = Arc::clone(&on_mouse);
+        device_state.on_mouse_up(move |key| {
+            let buffers = capture_and_buffer();
+            md(key.clone(), MouseEventType::MouseUp, buffers);
+        });
+    }
+
+    if run_permantently
+        && (events.key_down || events.key_up || events.mouse_down || events.mouse_up)
+    {
         loop {
             thread::sleep(Duration::from_secs(1000));
         }
@@ -81,5 +180,13 @@ where
 
 #[test]
 fn test_capture() {
-    rec_on_key("yalla", true, |k, e| (), |m, e| (), |k,e| (), |k,e| ());
+    rec_to_file(
+        "yalla",
+        RegisterEvents::default(),
+        true,
+        |k, e| (),
+        |m, e| (),
+        |k, e| (),
+        |k, e| (),
+    );
 }
